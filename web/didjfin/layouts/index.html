@@ -1,0 +1,9 @@
+{{ define "main" }}
+
+<div class="homepage-content">
+  <h1 class="site-title" style="font-family:{{ .Site.Params.siteTitleFont }}">{{ .Site.Title }}</h1>
+  <h5 class="site-caption" style="text-align:center;">A personal website / blog, mostly about data..</h4>
+  {{ partial "quote.html" }}
+</div>
+
+{{ end }}

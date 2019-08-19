@@ -1,0 +1,55 @@
+<head>
+  <!-- meta -->
+  <meta name="title" charset="utf-8" content="{{ .Title }}">
+
+  {{ template "_internal/opengraph.html" . }}
+
+  {{ if .Description }}
+    <meta name="description" charset="utf-8" content="{{ .Description }}">
+  {{ else }}
+    <meta name="description" charset="utf-8" content= "{{ .Site.Params.description | markdownify }}">
+  {{ end }}
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <style>
+      html body {
+        color: #2e3440;
+				font-size: 12px;
+        font-family: '{{ .Site.Params.font }}', sans-serif;
+        background-color: {{ .Site.Params.backgroundColor | default "white" }};
+      }
+
+      :root {
+        --accent: {{ .Site.Params.accent }};
+        --borderAccent: {{ .Site.Params.borderAccent }};
+        --fillAccent: {{ .Site.Params.fillAccent }};
+        --fillBorderAccent: {{ .Site.Params.fillBorderAccent }};
+        --siteTitleFont: {{ .Site.Params.siteTitleFont }};
+      }
+  </style>
+
+  <!-- Google Analytics -->
+  {{ partial "google-analytics.html" . }}
+
+  <!-- css -->
+  <link rel="stylesheet" href="{{ "css/main.css" | relURL }}">
+
+  <!-- highlight.js -->
+  <link rel="stylesheet" href="{{ "css/nord.css" | relURL }}">
+  <script src="{{ "js/highlight.pack.js" | relURL }}"></script>
+  <script>hljs.initHighlightingOnLoad();</script>
+
+  <!-- google fonts -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css?family={{ .Site.Params.font }}">
+  {{ if .IsHome }}
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css?family={{ .Site.Params.siteTitleFont }}">
+  {{ end }}
+
+  <!-- font awesome 4.7.0 -->
+  <link rel="stylesheet" href="{{ "font-awesome-4.7.0/css/font-awesome.min.css" | relURL }}">
+
+  <!-- Bootstrap -->
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
+  <script src="https://code.jquery.com/jquery-3.3.1.slim.min.js" integrity="sha384-q8i/X+965DzO0rT7abK41JStQIAqVgRVzpbzo5smXKp4YfRvH+8abtTE1Pi6jizo" crossorigin="anonymous"></script>
+  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js" integrity="sha384-JjSmVgyd0p3pXB1rRibZUAYoIIy6OrQ6VrjIEaFf/nJGzIxFDsf4x0xIM+B07jRM" crossorigin="anonymous"></script>
+</head>

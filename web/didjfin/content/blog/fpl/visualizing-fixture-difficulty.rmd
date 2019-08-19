@@ -1,0 +1,280 @@
+---
+title: "Visualizing Premier League fixture difficulty"
+author: "Didrik Finnøy"
+date: 2019-08-14
+tags: ["R", "ggplot2", "plotly", "shiny"]
+series: ["Fantasy Premier League"]
+series_weight: 2
+description: "The tone within one of my fantasy leagues has become rather sassy as of late."
+images: ["visualizing-fixture-difficulty.png"]
+output: 
+  blogdown::html_page:
+    toc: true
+    toc_depth: 5
+---
+```{r options, echo = F, cache = F}
+options(width = 145)
+```
+
+<hr>
+
+When playing Fantasy Premier League, people are very preoccupied with what opposition the players on their team will be facing in the short term.
+A commonly held belief is that players tend to get more fantasy points against weaker opposition.
+I haven't done any actual analysis to support this belief, but it sounds perfectly reasonable, and I think it's wise to keep upcoming fixtures in mind when planning your transfers.
+
+With that in mind, wouldn't it be neat if it was super easy to quickly get an overview over every single team's schedule?
+If you don't subscribe to any premium FPL analysis services, you're probably evaluating matchups by clicking through the FPL user interface.
+The purpose of this post is to demonstrate that there's a better way, you'll also find a neat data visualization that you can use for the remainder of the 2019-20 Premier League season.
+
+## Getting data on upcoming fixtures
+
+Let's get some data from the Premier League API.
+If you're not familiar with this data source, check out the first post in this series (there is a link at the top of this page).
+```{r, eval = F}
+library(tidyverse)
+library(jsonlite)
+
+# Download the `bootstrap-static` dataset into your R session
+url <- "https://fantasy.premierleague.com/api/"
+bootstrap_static <- fromJSON(paste0(url, "bootstrap-static"))
+```
+```{r, echo = F, message = F}
+library(tidyverse)
+library(jsonlite)
+bootstrap_static <- readRDS("./data/fantasy-premier-league-data/bootstrap-static.RDS")
+```
+The `bootstrap_static` dataset from the FPL API contains all the information we need for superior fixture planning that will shock and baffle your competition.
+If you're not familiar with the FPL API, check out the first post in this series (link at the top).
+
+We'll start by creating an overview of teams that are participating in the current Premier League season.
+```{r}
+teams <- bootstrap_static$teams %>% 
+  as_tibble() %>% 
+  select(name, id, code, starts_with("strength"))
+
+teams
+```
+Lots of juicy information here. 
+Not only does this dataset allow us to evaluate players based on the opponents overall strength; we can also compare offensive versus defensive strength, and home versus away strength.
+We don't even have to calculate anything, all that needs to be done is to present pre-existing information in a user friendly manner.
+
+The next piece of the puzzle is to get an overview of the Premier League schedule, this data is also contained within the FPL API, but not within the `bootstrap_static` sub-domain.
+To get a hold of this information, we need to access the extended player data available in the `element-summary` branch of the API. 
+We only need one of these summaries from each team, so the next step will be to pick a player from each team, and download his `element_summary` dataset.
+
+```{r, eval = F}
+# Get the `id` numer of one player from each team
+team_fixtures <- bootstrap_static$elements %>% 
+  as_tibble() %>% 
+  group_by(team_code) %>% 
+  summarize(player_id = first(id)) %>% 
+  ungroup() %>% 
+  # Add team names
+  left_join(
+    teams %>% rename(team = name, team_code = code), by = "team_code"
+  ) %>% 
+  # Download an `element-summary` for each `player_id`
+  mutate(
+    element_summary = map(player_id, function(x) {
+      paste0(
+        "https://fantasy.premierleague.com/api/element-summary/", x, "/"
+      ) %>% 
+        fromJSON(.)
+    }),
+    # Extract the fixture overview from each `element_summary`
+    fixtures = map(element_summary, function(x) x$fixtures)
+  ) %>% 
+  # Drop columns that we don't need anymore
+  select(-team_code, -id, -player_id, -element_summary)
+
+team_fixtures
+```
+```{r, echo = F}
+team_fixtures <- readRDS("./data/visualizing-fixture-difficulty/team_fixtures.RDS")
+team_fixtures
+```
+
+At the moment, each team's fixtures are stored within nested datasets under the `fixtures` column.
+Note that `fixtures` does not include completed games, only games that have yet to be played.
+
+Our next step will be to clean up the nested `fixtures` datasets under `team_fixtures`:
+```{r}
+# Display one of our 20 `fixtures` datasets
+team_fixtures$fixtures[[1]] %>% as_tibble()
+```
+The nested datasets contain a lot of information that we're not interested in right now, and the data's format is not optimal for creating nice visualizations.
+A little bit of data wrangling is required before we proceed:
+
+```{r}
+plot_data <- team_fixtures %>% 
+  as_tibble() %>% 
+  mutate(
+    # Transform the nested `fixtures` datasets
+    fixtures = map(fixtures, function(x) {
+      x %>%
+        # Get opponent's id number
+        mutate(opponent_team_id = ifelse(is_home, team_a, team_h)) %>% 
+        # Only keep the variables we need
+        select(
+          gameweek = event, opponent_team_id, is_home, difficulty
+        ) %>% 
+        # Merge with the `teams` dataset for team names and strength variables
+        left_join(
+          teams %>% 
+            # Add data about the opposition
+            select(
+              opponent_team_id = id, 
+              opponent_team = name,
+              opponent_strength = strength,
+              opponent_strength_overall_home = strength_overall_home,
+              opponent_strength_overall_away = strength_overall_away,
+              opponent_strength_attack_home = strength_attack_home,
+              opponent_strength_attack_away = strength_attack_away,
+              opponent_strength_defence_home = strength_defence_home,
+              opponent_strength_defence_away = strength_defence_away
+            ),
+          by = "opponent_team_id"
+        ) %>% 
+        select(-opponent_team_id)  # Don't need this anymore
+    })
+  ) %>% 
+  # Convert from nested to long format, leaving us with one row per team-fixture
+  unnest() %>% 
+  # Impose more practical column ordering
+  select(
+    gameweek, team, opponent_team, is_home, difficulty, everything()
+  )
+
+plot_data
+```
+That's more like it, now we have a dataset, `plot_data` thats easily digestable by our plotting packages.
+
+## Visualizing the data
+
+My preferred way of visualizing this information is through a *heatmap*, also known as a *tile plot*.
+I figured it would be useful to demonstrate three techniques for producing this type of plot with R.
+We'll start with the simplest approach, and finish with the most complex one.
+
+##### Easy heatmap with `ggplot2`
+
+When I just want a static plot with no bells and whistles, `ggplot2` is my preferred visualization package.
+The package has already been loaded through the `library(tidyverse)` command earlier on.
+I'll be using the `RColorBrewer` package for a nice-looking and intuitive color scheme, and the `ggthemes` package to make the plot look nicer without having to write a lot of code.
+```{r, fig.width = 10}
+library(RColorBrewer)
+library(ggthemes)
+
+plot <- plot_data %>% 
+  # Modify the `team` variable so teams are displayed in alphabetical order
+  mutate(
+    team = factor(team) %>%
+      factor(., levels = rev(levels(.)))
+  ) %>% 
+  # Create the plot based on our input data
+  ggplot(aes(x = gameweek, y = team, fill = difficulty)) + 
+  geom_raster() +
+  # Specify the x-axis layout
+  scale_x_continuous(
+    limits = c(0, 39), 
+    breaks = seq(2, 38, 2), 
+    expand = c(0, 0)
+  ) +
+  # Set the color scheme
+  scale_fill_distiller(palette = "YlOrRd", direction = 1) +
+  # Set the theme
+  theme_tufte(base_family = "sans-serif") +
+  # Set the labels
+  labs(
+    title = "Fixture difficulty, Premier League 2019-20",
+    x = "Gameweek", 
+    y = "", 
+    fill = "Difficulty"
+  )
+
+plot
+```
+Not too shabby, but we can do better.
+
+
+##### Interactive heatmap with `plotly`
+
+I want to to incorporate even more information in the plot without making it too noisy.
+We could, for example, make it so that hovering your cursor over one of the colored tiles would provide information about that fixture.
+This is quite easy to do with the excellent `plotly` package for R.
+
+```{r, message = F, warning = F, out.width = "100%"}
+library(plotly)
+
+plot <- plot_data %>% 
+  # Modify the `team` variable so teams are displayed in alphabetical order
+  mutate(
+    team = factor(team) %>%
+      factor(., levels = rev(levels(.)))
+  ) %>% 
+  # Create the plot based on our input data
+  ggplot(aes(x = gameweek, y = team, fill = difficulty)) + 
+  geom_raster(
+    # Define the tooltip contents with HTML
+    aes(text = paste0(
+      "<b>", team, " (GW", gameweek, 
+      ifelse(is_home, " Home", " Away"), ")</b><br>",
+      "Attack strenght<br>",
+      "&nbsp;&nbsp;Home: ", strength_attack_home, "<br>",
+      "&nbsp;&nbsp;Away: ", strength_attack_away, "<br>",     
+      "Defense strength<br>",
+      "&nbsp;&nbsp;Home: ", strength_defence_home, "<br>",
+      "&nbsp;&nbsp;Away: ", strength_defence_away, "<br><br>",     
+      "<b>vs. ", opponent_team, "</b><br>",
+      "Attack strenght<br>",
+      "&nbsp;&nbsp;Home: ", opponent_strength_attack_home, "<br>",
+      "&nbsp;&nbsp;Away: ", opponent_strength_attack_away, "<br>",     
+      "Defense strength<br>",
+      "&nbsp;&nbsp;Home: ", opponent_strength_defence_home, "<br>",
+      "&nbsp;&nbsp;Away: ", opponent_strength_defence_away
+    ))
+  ) +
+  # Specify the x-axis layout
+  scale_x_continuous(
+    limits = c(0, 39), 
+    breaks = seq(2, 38, 2), 
+    expand = c(0, 0)
+  ) +
+  # Set the color scheme
+  scale_fill_distiller(palette = "YlOrRd", direction = 1) +
+  # Set the theme
+  theme_tufte(base_family = "sans-serif") +
+  # Set the labels
+  labs(
+    title = "Fixture difficulty, Premier League 2019-20",
+    x = "Gameweek", 
+    y = "", 
+    fill = "Difficulty"
+  )
+
+# Render the `ggplot2` visualization with `plotly`
+ggplotly(plot, tooltip = "text") %>% 
+  # Disable unneccessary plotly functionality
+  layout(
+    xaxis = list(fixedrange = T),  
+    yaxis = list(fixedrange = T)
+  ) %>% 
+  config(displayModeBar = F) 
+```
+
+Useful, but we can do even better.
+When we're looking at upcoming fixtures, trying to figure out what players we should add to our fantasy teams, we might only be interested one team's attacking strength, versus another team's defensive strength.
+The plot above allows you to compare these variables, but it requires too many cognitive calories for my liking.
+
+
+##### Even more interactive heatmap with `plotly` + `shiny`
+
+We can take this plot to the next level by allowing users to choose what information they would like to see.
+The go-to library for such matters in the world of R, is called `shiny`.
+Making a `shiny` application requires a fair bit of code; too much for this post.
+Instead, I'll let you play around with the end result below, and refer you to [my GitHub repository](https://github.com/djfinnoy/didjfin-extras/blob/master/fpl-fixture-difficulty-shiny/app.rmd) if you'd like to see how it was made.
+You'll find an R notebook (.rmd) file that you can copy-paste into RStudio, and run to create an up-to-date version of the plot below.
+It should totally work for the remainder of the 2019-20 season (assuming you've installed all the required packages).
+If they change the API again next year, it might need some adjustments.
+
+
+<iframe src="http://www.didjfin.no/shiny/fpl/visualizing-fixture-difficulty/" scrolling="no" frameborder="no" style='height:550px;'></iframe>

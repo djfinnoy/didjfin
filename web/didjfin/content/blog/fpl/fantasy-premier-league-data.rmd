@@ -1,0 +1,466 @@
+---
+title: "Building a dataset for Fantasy Premier League analysis"
+author: "Didrik Finnøy"
+date: 2019-08-12
+tags: ["R"]
+series: ["Fantasy Premier League"]
+series_weight: 1
+description: "The tone within one of my fantasy leagues has become rather sassy as of late."
+images: ["didjfin-cursive.png"]
+output: 
+  blogdown::html_page:
+    toc: true
+    toc_depth: 3
+---
+```{r options, echo = F, cache = F}
+options(width = 145)
+```
+
+<hr>
+
+People often ask me if I have some sort of *artificially intelligent* algorithm assisting me with my Fantasy Premier League (FPL) team.
+Not because I'm particularly good at FPL, but because my day job is to develop data driven solutions to business problems.
+The answer has always been *'no'*, but the tone within one of my fantasy leagues has become rather sassy as of late, so I figured it's time to smash out some data science.
+
+This is the first post in a series about Fantasy Premier League, [a free online game](https://fantasy.premierleague.com/a/home).
+Over the course of this series, we'll use R to build cool stuff on top of Premier League data.
+In this post, we'll build a player performance dataset covering not just recent fixtures, but also historical results going all the way back to the 2016 season.
+
+## The Fantasy Premier League API
+Most match and player stats from the current season are freely available through an API.
+The downside is that the API only contains detailed data for the ongoing Premier League season; if we want historical data we'll have to look elsewhere.
+
+The majority of the APIs data can be accessed through its *bootstrap-static* dataset.
+You can view this data in your browser by visiting [https://fantasy.premierleague.com/api/bootstrap-static/](https://fantasy.premierleague.com/api/bootstrap-static/).
+Note that this dataset gets updated throughout the season, and will disappear to make room for next season's data sometime during summer 2020.
+The structure of the data, and even the APIs URL, has been known to change over time, so the code in this post may stop working some day.
+
+The following R code downloads the `bootstrap-static` dataset into your session:
+
+```{r, eval = F}
+library(tidyverse)
+library(jsonlite)
+
+# Download the `bootstrap-static` dataset into your R session
+url <- "https://fantasy.premierleague.com/api/"
+bootstrap_static <- fromJSON(paste0(url, "bootstrap-static/"))
+```
+```{r, echo = F, message = F}
+library(tidyverse)
+library(jsonlite)
+
+bootstrap_static <- readRDS("./data/fantasy-premier-league-data/bootstrap-static.RDS")
+```
+
+The `boostrap_static` object defined above is a list of lists and tables.
+We are mostly interested in two items from that list; `elements` and `teams`.
+The following code chunk extracts the `teams` table from `bootstrap_static`:
+
+```{r}
+# Get a list of Permier League teams, along with their id values
+teams <- bootstrap_static$teams %>%
+  select(name, code, id) %>%
+  as_tibble()
+
+teams
+```
+
+You may be wondering why each team has two numerical identifiers (`id` and `code`).
+`code` is a permanent id number that can be used to identify a team across different seasons.
+`id` has values from 1 to 20, and is based on the alphabetical order of team names within a season.
+I don't know why they need both, our task would be simpler if the APIs data structure was built around `code` instead of `id`, but it's nothing a bunch a code won't fix.
+
+The next step is to get data about individual players.
+The following code chunk extracts the `elements` table from `bootstrap_static`.
+Note that the API refers to players as *elements*.
+
+```{r}
+# Display player data included in `bootstrap_static`
+players <- bootstrap_static$elements %>%
+  as_tibble()
+
+players
+```
+
+More player data is available through the `element-summary` subdomain of the API.
+Each player has a separate URL pointing to their `element-summary` table.
+To view a player's `element-summary` in your browser, visit [https://fantasy.premierleague.com/api/element-summary/PLAYER-ID-VALUE](https://fantasy.premierleague.com/api/element-summary/182).
+The following chunk of R code will collect the summaries for all player `id` values present in the `bootstrap_static` table.
+It's accessing a lot of data through a lot of different sub-domains, so it may take a few minutes to run.
+
+```{r, eval = F}
+# Use `bootstrap_static` player id's to access richer player data through the API
+players <- bootstrap_static$elements %>%
+  as_tibble()  %>%
+  mutate(
+    # Merge the name columns
+    name = paste(first_name, second_name),
+    # Make the `status` column more interpretable
+    status = case_when(
+      status == "a" ~ "Available",
+      status == "i" ~ "Injured",
+      status == "u" ~ "Unavailable",
+      status == "d" ~ "Doubtful",
+      status == "n" ~ "On loan",
+      status == "s" ~ "Suspended"
+    ),
+    # Download the element-summary dataset for each player
+    element_summary = map(id, function(x) {
+      paste0(url, "element-summary/", x, "/") %>% 
+        fromJSON(element_summary_url)
+    }),
+    # Extract data on upcoming fixtures for each player
+    fixtures = map(element_summary, function(x) {
+        x$fixtures %>%
+        mutate(
+          # Fix time format
+          kickoff_time = kickoff_time %>% 
+            str_replace("T", " ") %>% 
+            str_replace("Z", "") %>% 
+            as.POSIXct()
+        ) %>% 
+        as_tibble()
+    }),
+    # Extract data on match statistics from games played this season
+    history = map(element_summary, function(x) {
+      x$history %>% 
+        mutate(
+          # Fix format
+          kickoff_time = kickoff_time %>% 
+            str_replace("T", " ") %>% 
+            str_replace("Z", "") %>% 
+            as.POSIXct()
+        ) %>%        
+        # Fix format issues (numeric variables being read as strings)
+        mutate_at(
+          vars(influence, creativity, threat, ict_index), 
+          funs(as.numeric)
+        ) %>% 
+        as_tibble()
+    })
+  ) %>% 
+  select(
+    name, player_id = id, player_code = code, 
+    element_type, status, team_code, fixtures, history
+  )    
+
+players
+```
+```{r, echo = F}
+players <- readRDS("./data/fantasy-premier-league-data/players.RDS")
+players
+```
+
+`players` is now an up to date overview of each player's current season.
+The `history` column contains nested data on games played this season:
+
+```{r}
+# Display an example of the `history` datasets
+players$history[[1]]
+```
+
+The `fixtures` column contains data on upcoming games:
+
+```{r}
+# Display an example of the `fixtures` datasets
+players$fixtures[[1]]
+```
+
+Note that in `history` and `fixtures`, teams are referenced by their season specific `id` number.
+
+## API data from previous seasons
+
+Each player's nested `history` table only contains two rows, because at the time of writing, only two rounds of the current season has been played.
+This isn't really enough data to do anything interesting.
+Like I mentioned earlier, we'll need to look outside the API if we want data from previous seasons.
+My favorite source for historical data is [vaastav's GitHub repository](https://github.com/vaastav/Fantasy-Premier-League).
+Vaastav collects data from the API each year, and puts in on GitHub so people can still access it after they wipe the API.
+What we want to do, is combine current data from the API with historical data from vaastav's repository.
+Why not just the repository instead of the API you might ask, the answer is that it's missing some information that's available through the API, and because the API probably updates faster than the repository.
+
+```{r, eval = F}
+# Download data for the past couple of seasons from vaastav's GitHub repository
+vaastav <- tibble(
+  gameweek = rep(1:38, 3) %>% paste0("gw", .),
+  season = c(rep("2016-17", 38), rep("2017-18", 38), rep("2018-19", 38))
+) %>% 
+  mutate(
+    gw_data = map2(season, gameweek, function(x, y) {
+      paste0(
+        "https://raw.githubusercontent.com/",
+        "vaastav/Fantasy-Premier-League/master/data/",
+        x, "/gws/", y, ".csv"
+      ) %>% 
+      read_csv()
+    })
+  ) %>% 
+  # Merge into one long dataset for each season
+  group_by(season) %>% 
+  summarize(
+    gw_data = list(bind_rows(gw_data))
+  ) %>% 
+  ungroup() %>% 
+  mutate(
+    # Download additional data about players from the `players_raw.csv` files
+    player_info = map(season, function(x) {
+      paste0(
+        "https://raw.githubusercontent.com/",
+        "vaastav/Fantasy-Premier-League/master/data/",
+        x, "/players_raw.csv"
+      ) %>% 
+        read_csv() %>% 
+        mutate(name = paste(first_name, second_name)) %>% 
+        select(element = id, player_code = code, name, element_type)
+    }),
+    # Add useful columns from the `players_raw.csv` files to the first bunch of files we downloaded
+    clean_gw_data = map2(gw_data, player_info, function(x, y) {
+      x %>% 
+        # The `name` variables from the gw files is a bit messed up, so we'll drop it
+        select(-name) %>% 
+        # ..and replace it with the `name` variable from `player_info`
+        left_join(., y, by = "element") %>% 
+        # Only keep variables present in the `history` dataset from the API
+        # since our aim is to merge all of our data into one big table
+        select(name, player_code, element_type, names(players$history[[1]]))
+    })
+  ) %>% 
+  # Combine all the modified `gw` files into one long dataset
+  pull(clean_gw_data) %>% 
+  map_dfr(., ~bind_rows(.x)) %>% 
+  # Nest the data by player_code so the result looks like our `players` dataset
+  group_by(name, element_type, player_code) %>% 
+  nest(.key = "history")
+```
+```{r, echo = F}
+vaastav <- readRDS("./data/fantasy-premier-league-data/vaastav.RDS")
+```
+
+Sometimes, a player's name can change between seasons, or at least the way it's written within the API.
+A player's position can also change over time.
+The `vaastav` table created above was intentionally nested by `name`, `element_type` (position) and `player_code` to highlight these issues, and the importance of using `player_code` when combining data from different seasons.
+Here are some examples of why you shouldn't attempt to merge historical FPL datasets by player names / positions:
+
+```{r}
+# `player_code` values with multiple associated names / positions
+duplicates <- vaastav$player_code[which(vaastav$player_code %>% duplicated)]
+
+# Display the duplicates
+vaastav %>%
+  filter(player_code %in% duplicates) %>%
+  arrange(player_code)
+```
+
+Below we fix the name/position issues so the `vaastav` table can be combined with our `players` table from the FPL API.
+
+```{r}
+# Merge rows belonging to a single player
+vaastav <- vaastav %>%
+  mutate(
+    # Add `element_type` to the `history` datasets
+    history = map2(history, element_type, function(x, y) {
+      x$element_type <- y
+      return(x)
+    })
+  ) %>% 
+  # Collapse into one row per `player_code`
+  group_by(player_code) %>% 
+  summarize(
+    name = last(name),
+    history = list(bind_rows(history))
+  ) %>%
+  ungroup() %>% 
+  arrange(player_code)
+```
+
+Please note that if a player's position changed during an ongoing season, as opposed to in between seasons, we are not able to capture that with our current data (I don't know if this actually happens).
+In the `vaastav` table, we get `element_type` from his `players_raw.csv` files; these files only describe a player's position at the end of a season.
+In `players`, we have an opportunity to capture position changes, but I didn't bother doing it because I'm not able to correct the problem in `vaastav`.
+As a consequence, each player's position will be fixed within a given season, even if it actually changed in real life.
+For the time being, this is a potential problem that we'll just have to live with.
+
+We're now left with a table, `vaastav`, where each row represents a player, and contains a nested dataset over his performance going back to the start of the 2016 Premier League season:
+
+```{r}
+vaastav 
+```
+
+## Combining data from current and previous seasons
+
+At this stage, we've got the `players` table containing data from the **current** PL season, and the `vaastav` table containing data from **previous** PL seasons.
+We want to combine these tables, leaving us with a rich description of the real world phenomenon we call the Premier League.
+With this table, we'll be able to visualize complex information, make predictions, and beat my friends at a silly online game.
+
+```{r}
+# Combine `vaastav` and `players`
+completed_fixtures <- vaastav %>% 
+  left_join(
+    players %>% 
+      select(player_code, current_season_history = history),
+    by = "player_code"
+  ) %>% 
+  mutate(
+    # Add a helper variable indicating whether a player still plays in the Premier League
+    in_current_season = map_lgl(current_season_history, ~!is.null(.x)),
+    # Merge the history datasets
+    history = map2(history, current_season_history, function(x, y) {
+      if(is.null(y)) return(x)
+      else return(bind_rows(x, y))
+    })
+  ) %>% 
+  select(-current_season_history) %>% 
+  unnest()
+
+completed_fixtures
+```
+
+The rows in `completed_fixtures` are a single player's stats from a single game, let's call them *player-fixtures*.
+Now that we've got all of our `r nrow(completed_fixtures)` player-fixtures stored in a single table, we can perform some simple cleaning operations to make the data a bit more user friendly.
+
+We'll perform the following cleaning operations:
+
+- Add a categorical variable indicating which PL season each fixture belongs to.
+- Replace team `id` values with the team's name.
+- Replace `element_type` with a more interpretable `position` variable.
+
+Adding team names to our `completed_fixtures` table is a bit of an ordeal.
+We have our `teams` table from the API, but this table doesn't contain information about teams that are not currently playing in the Premier League.
+Vaastav's repository does contain `team_codes`, but it doesn't contain team names.
+Furthermore, our `completed_fixtures` table references teams by their `id` value (which can change every season), not their `team_code`.
+
+To get around all this, we'll start by building an overview of all team codes and team names going back to the 2016 season:
+```{r, eval = F}
+# Get previous season (2018-19) team names from vaastav's repository
+team_names <- paste0(
+    "https://raw.githubusercontent.com/",
+    "vaastav/Fantasy-Premier-League/master/data/2018-19/raw.json"
+  ) %>% 
+  fromJSON(.) %>% 
+  .$teams %>% 
+  as_tibble() %>% 
+  bind_rows(
+    # Get current season (2019-20) team names from the FPL api.
+    bootstrap_static$teams
+  ) %>% 
+  select(code, name) %>% 
+  # Add some missing teams manually
+  bind_rows(
+    tribble(
+      ~code, ~name, 
+      88,  "Hull",
+      25,  "Middlesbrough",
+      56,  "Sunderland",
+      35,  "West Bromwich Albion",
+      80,  "Swansea City",
+      110, "Stoke City"
+    )
+  ) %>% 
+  distinct()
+
+team_names
+```
+```{r, echo = F}
+team_names <- readRDS("./data/fantasy-premier-league-data/team_names.RDS")
+team_names
+```
+
+The next step is to build an overview over team `id` values and `team_code` for each season.
+Vaastav has this covered, so we'll just use data from his repository, including the latest season (which we've been using the API for up to this point).
+```{r, eval = F}
+# Get `id` and `code` values for each team, from each season
+team_ids <- tibble(
+  season = c("2016-17","2017-18","2018-19", "2019-20")
+) %>% 
+  mutate(
+    player_info = map(season, function(x) {
+      paste0(
+        "https://raw.githubusercontent.com/",
+        "vaastav/Fantasy-Premier-League/master/data/",
+        x, "/players_raw.csv"
+      ) %>% 
+        read_csv() %>% 
+        select(team, team_code) %>% 
+        distinct()
+    })
+  ) %>% 
+  unnest() %>% 
+  as_tibble() %>% 
+  select(season, id = team, code = team_code) %>% 
+  # Add team names
+  left_join(team_names, by = "code") %>% 
+  arrange(season, id)
+
+team_ids
+```
+```{r, echo = F}
+team_ids <- readRDS("./data/fantasy-premier-league-data/team_ids.RDS")
+team_ids
+```
+
+Finally, we'll create the `season` variable, replace the `id` values in `completed_fixtures` with team names, and create the `position` variable based on `element_type`:
+```{r, eval = F, message = F}
+# Helper function for identifying which PL season a given date belongs to
+get_season <- function(x) {
+  require(lubridate)
+  
+  year <- year(x)
+  month <- month(x)
+  
+  case_when(
+    month %in% c(1:7) ~ paste(year - 1, str_sub(year, 3, 4), sep = "-"),
+    month %in% c(8:12) ~ paste(year, str_sub(year + 1, 3, 4), sep = "-")
+  )
+}
+
+completed_fixtures <- completed_fixtures %>% 
+  # Add a `season` column
+  mutate(season = map_chr(kickoff_time, ~get_season(.x))) %>% 
+  # Replace `opponent_team` id values with team names
+  rename(opponent_team_id = opponent_team) %>% 
+  left_join(
+    team_ids %>% 
+      select(season, opponent_team_id = id, opponent_team = name),
+    by = c("season", "opponent_team_id")
+  ) %>% 
+  select(-opponent_team_id) %>% 
+  # Add a `team_name` variable for indicating what team a player belongs to
+  left_join(
+    {. -> x; x %>% 
+      group_by(season, fixture, was_home) %>% 
+      summarize(team_name = first(opponent_team)) %>% 
+      mutate(was_home = !was_home)},
+    by = c("season", "fixture", "was_home")
+  ) %>% 
+  # Create the `position` variable
+  mutate(
+    position = case_when(
+      element_type == 1 ~ "GK",
+      element_type == 2 ~ "DEF",
+      element_type == 3 ~ "MID",
+      element_type == 4 ~ "FWD"
+    )
+  ) %>% 
+  # Order columns
+  select(
+    player_code, name, kickoff_time, season, team_name, opponent_team, position,
+    everything(), -element_type
+  ) %>% 
+  # Order rows
+  arrange(season, fixture, team_name)
+```
+```{r, echo = F}
+completed_fixtures <- readRDS("./data/fantasy-premier-league-data/completed_fixtures.RDS")
+```
+
+That's it.
+Behold our final table in all its glory (only showing 100 of `r nrow(completed_fixtures)` rows to avoid slowing down your browser):
+
+```{r, echo = F, message = F}
+DT::datatable(
+  completed_fixtures %>% tail(100),
+  rownames = FALSE, 
+  options = list(scrollX="1000px")
+)
+```
+
+It's worth noting that we have limited ourselves to columns that are present in the current version of the API, and all of the csv files in Vaastav.
+This means that we've thrown away a few columns that are only available in one of the two sources; not ideal, but if we didn't take this approach we'd get a lot of trouble with missing values when we get to the predictive modelling stage of our path to FPL dominance.

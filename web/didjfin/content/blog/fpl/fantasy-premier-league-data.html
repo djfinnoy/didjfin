@@ -1,0 +1,501 @@
+---
+title: "Building a dataset for Fantasy Premier League analysis"
+author: "Didrik Finnøy"
+date: 2019-08-12
+tags: ["R"]
+series: ["Fantasy Premier League"]
+series_weight: 1
+description: "The tone within one of my fantasy leagues has become rather sassy as of late."
+images: ["didjfin-cursive.png"]
+output: 
+  blogdown::html_page:
+    toc: true
+    toc_depth: 3
+---
+
+<script src="/rmarkdown-libs/htmlwidgets/htmlwidgets.js"></script>
+<script src="/rmarkdown-libs/jquery/jquery.min.js"></script>
+<link href="/rmarkdown-libs/datatables-css/datatables-crosstalk.css" rel="stylesheet" />
+<script src="/rmarkdown-libs/datatables-binding/datatables.js"></script>
+<link href="/rmarkdown-libs/dt-core/css/jquery.dataTables.min.css" rel="stylesheet" />
+<link href="/rmarkdown-libs/dt-core/css/jquery.dataTables.extra.css" rel="stylesheet" />
+<script src="/rmarkdown-libs/dt-core/js/jquery.dataTables.min.js"></script>
+<link href="/rmarkdown-libs/crosstalk/css/crosstalk.css" rel="stylesheet" />
+<script src="/rmarkdown-libs/crosstalk/js/crosstalk.min.js"></script>
+
+<div id="TOC">
+<ul>
+<li><a href="#the-fantasy-premier-league-api">The Fantasy Premier League API</a></li>
+<li><a href="#api-data-from-previous-seasons">API data from previous seasons</a></li>
+<li><a href="#combining-data-from-current-and-previous-seasons">Combining data from current and previous seasons</a></li>
+</ul>
+</div>
+
+<hr>
+<p>People often ask me if I have some sort of <em>artificially intelligent</em> algorithm assisting me with my Fantasy Premier League (FPL) team. Not because I’m particularly good at FPL, but because my day job is to develop data driven solutions to business problems. The answer has always been <em>‘no’</em>, but the tone within one of my fantasy leagues has become rather sassy as of late, so I figured it’s time to smash out some data science.</p>
+<p>This is the first post in a series about Fantasy Premier League, <a href="https://fantasy.premierleague.com/a/home">a free online game</a>. Over the course of this series, we’ll use R to build cool stuff on top of Premier League data. In this post, we’ll build a player performance dataset covering not just recent fixtures, but also historical results going all the way back to the 2016 season.</p>
+<div id="the-fantasy-premier-league-api" class="section level2">
+<h2>The Fantasy Premier League API</h2>
+<p>Most match and player stats from the current season are freely available through an API. The downside is that the API only contains detailed data for the ongoing Premier League season; if we want historical data we’ll have to look elsewhere.</p>
+<p>The majority of the APIs data can be accessed through its <em>bootstrap-static</em> dataset. You can view this data in your browser by visiting <a href="https://fantasy.premierleague.com/api/bootstrap-static/" class="uri">https://fantasy.premierleague.com/api/bootstrap-static/</a>. Note that this dataset gets updated throughout the season, and will disappear to make room for next season’s data sometime during summer 2020. The structure of the data, and even the APIs URL, has been known to change over time, so the code in this post may stop working some day.</p>
+<p>The following R code downloads the <code>bootstrap-static</code> dataset into your session:</p>
+<pre class="r"><code>library(tidyverse)
+library(jsonlite)
+
+# Download the `bootstrap-static` dataset into your R session
+url &lt;- &quot;https://fantasy.premierleague.com/api/&quot;
+bootstrap_static &lt;- fromJSON(paste0(url, &quot;bootstrap-static/&quot;))</code></pre>
+<p>The <code>boostrap_static</code> object defined above is a list of lists and tables. We are mostly interested in two items from that list; <code>elements</code> and <code>teams</code>. The following code chunk extracts the <code>teams</code> table from <code>bootstrap_static</code>:</p>
+<pre class="r"><code># Get a list of Permier League teams, along with their id values
+teams &lt;- bootstrap_static$teams %&gt;%
+  select(name, code, id) %&gt;%
+  as_tibble()
+
+teams</code></pre>
+<pre><code>## # A tibble: 20 x 3
+##    name            code    id
+##    &lt;chr&gt;          &lt;int&gt; &lt;int&gt;
+##  1 Arsenal            3     1
+##  2 Aston Villa        7     2
+##  3 Bournemouth       91     3
+##  4 Brighton          36     4
+##  5 Burnley           90     5
+##  6 Chelsea            8     6
+##  7 Crystal Palace    31     7
+##  8 Everton           11     8
+##  9 Leicester         13     9
+## 10 Liverpool         14    10
+## 11 Man City          43    11
+## 12 Man Utd            1    12
+## 13 Newcastle          4    13
+## 14 Norwich           45    14
+## 15 Sheffield Utd     49    15
+## 16 Southampton       20    16
+## 17 Spurs              6    17
+## 18 Watford           57    18
+## 19 West Ham          21    19
+## 20 Wolves            39    20</code></pre>
+<p>You may be wondering why each team has two numerical identifiers (<code>id</code> and <code>code</code>). <code>code</code> is a permanent id number that can be used to identify a team across different seasons. <code>id</code> has values from 1 to 20, and is based on the alphabetical order of team names within a season. I don’t know why they need both, our task would be simpler if the APIs data structure was built around <code>code</code> instead of <code>id</code>, but it’s nothing a bunch a code won’t fix.</p>
+<p>The next step is to get data about individual players. The following code chunk extracts the <code>elements</code> table from <code>bootstrap_static</code>. Note that the API refers to players as <em>elements</em>.</p>
+<pre class="r"><code># Display player data included in `bootstrap_static`
+players &lt;- bootstrap_static$elements %&gt;%
+  as_tibble()
+
+players</code></pre>
+<pre><code>## # A tibble: 529 x 53
+##    chance_of_playi… chance_of_playi…   code cost_change_eve… cost_change_eve… cost_change_sta… cost_change_sta… dreamteam_count element_type
+##               &lt;int&gt;            &lt;int&gt;  &lt;int&gt;            &lt;int&gt;            &lt;int&gt;            &lt;int&gt;            &lt;int&gt;           &lt;int&gt;        &lt;int&gt;
+##  1               NA               NA  69140                0                0                0                0               0            2
+##  2                0                0  98745                0                0                0                0               0            2
+##  3              100               75 111457                0                0                0                0               0            2
+##  4               NA               NA 154043                0                0                0                0               1            2
+##  5               NA               NA  39476                0                0                0                0               0            2
+##  6               NA               NA  38411                0                0                0                0               0            2
+##  7                0                0  51507                0                0                0                0               0            2
+##  8                0                0 233963                0                0                0                0               0            2
+##  9                0                0  80254                0                0                0                0               0            2
+## 10                0                0 156074                0                0                0                0               0            2
+## # … with 519 more rows, and 44 more variables: ep_next &lt;chr&gt;, ep_this &lt;chr&gt;, event_points &lt;int&gt;, first_name &lt;chr&gt;, form &lt;chr&gt;, id &lt;int&gt;,
+## #   in_dreamteam &lt;lgl&gt;, news &lt;chr&gt;, news_added &lt;chr&gt;, now_cost &lt;int&gt;, photo &lt;chr&gt;, points_per_game &lt;chr&gt;, second_name &lt;chr&gt;,
+## #   selected_by_percent &lt;chr&gt;, special &lt;lgl&gt;, squad_number &lt;lgl&gt;, status &lt;chr&gt;, team &lt;int&gt;, team_code &lt;int&gt;, total_points &lt;int&gt;,
+## #   transfers_in &lt;int&gt;, transfers_in_event &lt;int&gt;, transfers_out &lt;int&gt;, transfers_out_event &lt;int&gt;, value_form &lt;chr&gt;, value_season &lt;chr&gt;,
+## #   web_name &lt;chr&gt;, minutes &lt;int&gt;, goals_scored &lt;int&gt;, assists &lt;int&gt;, clean_sheets &lt;int&gt;, goals_conceded &lt;int&gt;, own_goals &lt;int&gt;,
+## #   penalties_saved &lt;int&gt;, penalties_missed &lt;int&gt;, yellow_cards &lt;int&gt;, red_cards &lt;int&gt;, saves &lt;int&gt;, bonus &lt;int&gt;, bps &lt;int&gt;, influence &lt;chr&gt;,
+## #   creativity &lt;chr&gt;, threat &lt;chr&gt;, ict_index &lt;chr&gt;</code></pre>
+<p>More player data is available through the <code>element-summary</code> subdomain of the API. Each player has a separate URL pointing to their <code>element-summary</code> table. To view a player’s <code>element-summary</code> in your browser, visit <a href="https://fantasy.premierleague.com/api/element-summary/182">https://fantasy.premierleague.com/api/element-summary/PLAYER-ID-VALUE</a>. The following chunk of R code will collect the summaries for all player <code>id</code> values present in the <code>bootstrap_static</code> table. It’s accessing a lot of data through a lot of different sub-domains, so it may take a few minutes to run.</p>
+<pre class="r"><code># Use `bootstrap_static` player id&#39;s to access richer player data through the API
+players &lt;- bootstrap_static$elements %&gt;%
+  as_tibble()  %&gt;%
+  mutate(
+    # Merge the name columns
+    name = paste(first_name, second_name),
+    # Make the `status` column more interpretable
+    status = case_when(
+      status == &quot;a&quot; ~ &quot;Available&quot;,
+      status == &quot;i&quot; ~ &quot;Injured&quot;,
+      status == &quot;u&quot; ~ &quot;Unavailable&quot;,
+      status == &quot;d&quot; ~ &quot;Doubtful&quot;,
+      status == &quot;n&quot; ~ &quot;On loan&quot;,
+      status == &quot;s&quot; ~ &quot;Suspended&quot;
+    ),
+    # Download the element-summary dataset for each player
+    element_summary = map(id, function(x) {
+      paste0(url, &quot;element-summary/&quot;, x, &quot;/&quot;) %&gt;% 
+        fromJSON(element_summary_url)
+    }),
+    # Extract data on upcoming fixtures for each player
+    fixtures = map(element_summary, function(x) {
+        x$fixtures %&gt;%
+        mutate(
+          # Fix time format
+          kickoff_time = kickoff_time %&gt;% 
+            str_replace(&quot;T&quot;, &quot; &quot;) %&gt;% 
+            str_replace(&quot;Z&quot;, &quot;&quot;) %&gt;% 
+            as.POSIXct()
+        ) %&gt;% 
+        as_tibble()
+    }),
+    # Extract data on match statistics from games played this season
+    history = map(element_summary, function(x) {
+      x$history %&gt;% 
+        mutate(
+          # Fix format
+          kickoff_time = kickoff_time %&gt;% 
+            str_replace(&quot;T&quot;, &quot; &quot;) %&gt;% 
+            str_replace(&quot;Z&quot;, &quot;&quot;) %&gt;% 
+            as.POSIXct()
+        ) %&gt;%        
+        # Fix format issues (numeric variables being read as strings)
+        mutate_at(
+          vars(influence, creativity, threat, ict_index), 
+          funs(as.numeric)
+        ) %&gt;% 
+        as_tibble()
+    })
+  ) %&gt;% 
+  select(
+    name, player_id = id, player_code = code, 
+    element_type, status, team_code, fixtures, history
+  )    
+
+players</code></pre>
+<pre><code>## # A tibble: 529 x 8
+##    name                      player_id player_code element_type status      team_code fixtures           history          
+##    &lt;chr&gt;                         &lt;int&gt;       &lt;int&gt;        &lt;int&gt; &lt;chr&gt;           &lt;int&gt; &lt;list&gt;             &lt;list&gt;           
+##  1 Shkodran Mustafi                  1       69140            2 Available           3 &lt;tibble [36 × 13]&gt; &lt;tibble [2 × 31]&gt;
+##  2 Héctor Bellerín                   2       98745            2 Injured             3 &lt;tibble [36 × 13]&gt; &lt;tibble [2 × 31]&gt;
+##  3 Sead Kolasinac                    3      111457            2 Available           3 &lt;tibble [36 × 13]&gt; &lt;tibble [2 × 31]&gt;
+##  4 Ainsley Maitland-Niles            4      154043            2 Available           3 &lt;tibble [36 × 13]&gt; &lt;tibble [2 × 31]&gt;
+##  5 Sokratis Papastathopoulos         5       39476            2 Available           3 &lt;tibble [36 × 13]&gt; &lt;tibble [2 × 31]&gt;
+##  6 Nacho Monreal                     6       38411            2 Available           3 &lt;tibble [36 × 13]&gt; &lt;tibble [2 × 31]&gt;
+##  7 Laurent Koscielny                 7       51507            2 Unavailable         3 &lt;tibble [36 × 13]&gt; &lt;tibble [2 × 31]&gt;
+##  8 Konstantinos Mavropanos           8      233963            2 Injured             3 &lt;tibble [36 × 13]&gt; &lt;tibble [2 × 31]&gt;
+##  9 Carl Jenkinson                    9       80254            2 Unavailable         3 &lt;tibble [36 × 13]&gt; &lt;tibble [2 × 31]&gt;
+## 10 Rob Holding                      10      156074            2 Injured             3 &lt;tibble [36 × 13]&gt; &lt;tibble [2 × 31]&gt;
+## # … with 519 more rows</code></pre>
+<p><code>players</code> is now an up to date overview of each player’s current season. The <code>history</code> column contains nested data on games played this season:</p>
+<pre class="r"><code># Display an example of the `history` datasets
+players$history[[1]]</code></pre>
+<pre><code>## # A tibble: 2 x 31
+##   element fixture opponent_team total_points was_home kickoff_time        team_h_score team_a_score round minutes goals_scored assists
+##     &lt;int&gt;   &lt;int&gt;         &lt;int&gt;        &lt;int&gt; &lt;lgl&gt;    &lt;dttm&gt;                     &lt;int&gt;        &lt;int&gt; &lt;int&gt;   &lt;int&gt;        &lt;int&gt;   &lt;int&gt;
+## 1       1      10            13            0 FALSE    2019-08-11 13:00:00            0            1     1       0            0       0
+## 2       1      11             5            0 TRUE     2019-08-17 11:30:00            2            1     2       0            0       0
+## # … with 19 more variables: clean_sheets &lt;int&gt;, goals_conceded &lt;int&gt;, own_goals &lt;int&gt;, penalties_saved &lt;int&gt;, penalties_missed &lt;int&gt;,
+## #   yellow_cards &lt;int&gt;, red_cards &lt;int&gt;, saves &lt;int&gt;, bonus &lt;int&gt;, bps &lt;int&gt;, influence &lt;dbl&gt;, creativity &lt;dbl&gt;, threat &lt;dbl&gt;, ict_index &lt;dbl&gt;,
+## #   value &lt;int&gt;, transfers_balance &lt;int&gt;, selected &lt;int&gt;, transfers_in &lt;int&gt;, transfers_out &lt;int&gt;</code></pre>
+<p>The <code>fixtures</code> column contains data on upcoming games:</p>
+<pre class="r"><code># Display an example of the `fixtures` datasets
+players$fixtures[[1]]</code></pre>
+<pre><code>## # A tibble: 36 x 13
+##       code team_h team_h_score team_a team_a_score event finished minutes provisional_start_ti… kickoff_time        event_name is_home difficulty
+##      &lt;int&gt;  &lt;int&gt; &lt;lgl&gt;         &lt;int&gt; &lt;lgl&gt;        &lt;int&gt; &lt;lgl&gt;      &lt;int&gt; &lt;lgl&gt;                 &lt;dttm&gt;              &lt;chr&gt;      &lt;lgl&gt;        &lt;int&gt;
+##  1 1059725     10 NA                1 NA               3 FALSE          0 FALSE                 2019-08-24 16:30:00 Gameweek 3 FALSE            5
+##  2 1059732      1 NA               17 NA               4 FALSE          0 FALSE                 2019-09-01 15:30:00 Gameweek 4 TRUE             4
+##  3 1059750     18 NA                1 NA               5 FALSE          0 FALSE                 2019-09-15 15:30:00 Gameweek 5 FALSE            3
+##  4 1059752      1 NA                2 NA               6 FALSE          0 FALSE                 2019-09-22 15:30:00 Gameweek 6 TRUE             2
+##  5 1059768     12 NA                1 NA               7 FALSE          0 FALSE                 2019-09-30 19:00:00 Gameweek 7 FALSE            4
+##  6 1059772      1 NA                3 NA               8 FALSE          0 FALSE                 2019-10-06 15:30:00 Gameweek 8 TRUE             2
+##  7 1059789     15 NA                1 NA               9 FALSE          0 FALSE                 2019-10-21 19:00:00 Gameweek 9 FALSE            2
+##  8 1059792      1 NA                7 NA              10 FALSE          0 FALSE                 2019-10-27 16:30:00 Gameweek … TRUE             3
+##  9 1059803      1 NA               20 NA              11 FALSE          0 FALSE                 2019-11-02 15:00:00 Gameweek … TRUE             3
+## 10 1059814      9 NA                1 NA              12 FALSE          0 FALSE                 2019-11-10 15:00:00 Gameweek … FALSE            3
+## # … with 26 more rows</code></pre>
+<p>Note that in <code>history</code> and <code>fixtures</code>, teams are referenced by their season specific <code>id</code> number.</p>
+</div>
+<div id="api-data-from-previous-seasons" class="section level2">
+<h2>API data from previous seasons</h2>
+<p>Each player’s nested <code>history</code> table only contains two rows, because at the time of writing, only two rounds of the current season has been played. This isn’t really enough data to do anything interesting. Like I mentioned earlier, we’ll need to look outside the API if we want data from previous seasons. My favorite source for historical data is <a href="https://github.com/vaastav/Fantasy-Premier-League">vaastav’s GitHub repository</a>. Vaastav collects data from the API each year, and puts in on GitHub so people can still access it after they wipe the API. What we want to do, is combine current data from the API with historical data from vaastav’s repository. Why not just the repository instead of the API you might ask, the answer is that it’s missing some information that’s available through the API, and because the API probably updates faster than the repository.</p>
+<pre class="r"><code># Download data for the past couple of seasons from vaastav&#39;s GitHub repository
+vaastav &lt;- tibble(
+  gameweek = rep(1:38, 3) %&gt;% paste0(&quot;gw&quot;, .),
+  season = c(rep(&quot;2016-17&quot;, 38), rep(&quot;2017-18&quot;, 38), rep(&quot;2018-19&quot;, 38))
+) %&gt;% 
+  mutate(
+    gw_data = map2(season, gameweek, function(x, y) {
+      paste0(
+        &quot;https://raw.githubusercontent.com/&quot;,
+        &quot;vaastav/Fantasy-Premier-League/master/data/&quot;,
+        x, &quot;/gws/&quot;, y, &quot;.csv&quot;
+      ) %&gt;% 
+      read_csv()
+    })
+  ) %&gt;% 
+  # Merge into one long dataset for each season
+  group_by(season) %&gt;% 
+  summarize(
+    gw_data = list(bind_rows(gw_data))
+  ) %&gt;% 
+  ungroup() %&gt;% 
+  mutate(
+    # Download additional data about players from the `players_raw.csv` files
+    player_info = map(season, function(x) {
+      paste0(
+        &quot;https://raw.githubusercontent.com/&quot;,
+        &quot;vaastav/Fantasy-Premier-League/master/data/&quot;,
+        x, &quot;/players_raw.csv&quot;
+      ) %&gt;% 
+        read_csv() %&gt;% 
+        mutate(name = paste(first_name, second_name)) %&gt;% 
+        select(element = id, player_code = code, name, element_type)
+    }),
+    # Add useful columns from the `players_raw.csv` files to the first bunch of files we downloaded
+    clean_gw_data = map2(gw_data, player_info, function(x, y) {
+      x %&gt;% 
+        # The `name` variables from the gw files is a bit messed up, so we&#39;ll drop it
+        select(-name) %&gt;% 
+        # ..and replace it with the `name` variable from `player_info`
+        left_join(., y, by = &quot;element&quot;) %&gt;% 
+        # Only keep variables present in the `history` dataset from the API
+        # since our aim is to merge all of our data into one big table
+        select(name, player_code, element_type, names(players$history[[1]]))
+    })
+  ) %&gt;% 
+  # Combine all the modified `gw` files into one long dataset
+  pull(clean_gw_data) %&gt;% 
+  map_dfr(., ~bind_rows(.x)) %&gt;% 
+  # Nest the data by player_code so the result looks like our `players` dataset
+  group_by(name, element_type, player_code) %&gt;% 
+  nest(.key = &quot;history&quot;)</code></pre>
+<p>Sometimes, a player’s name can change between seasons, or at least the way it’s written within the API. A player’s position can also change over time. The <code>vaastav</code> table created above was intentionally nested by <code>name</code>, <code>element_type</code> (position) and <code>player_code</code> to highlight these issues, and the importance of using <code>player_code</code> when combining data from different seasons. Here are some examples of why you shouldn’t attempt to merge historical FPL datasets by player names / positions:</p>
+<pre class="r"><code># `player_code` values with multiple associated names / positions
+duplicates &lt;- vaastav$player_code[which(vaastav$player_code %&gt;% duplicated)]
+
+# Display the duplicates
+vaastav %&gt;%
+  filter(player_code %in% duplicates) %&gt;%
+  arrange(player_code)</code></pre>
+<pre><code>## # A tibble: 58 x 4
+##    name                      element_type player_code history           
+##    &lt;chr&gt;                            &lt;dbl&gt;       &lt;dbl&gt; &lt;list&gt;            
+##  1 James Milner                         3       15157 &lt;tibble [76 × 31]&gt;
+##  2 James Milner                         2       15157 &lt;tibble [38 × 31]&gt;
+##  3 Ashley Young                         3       18892 &lt;tibble [76 × 31]&gt;
+##  4 Ashley Young                         2       18892 &lt;tibble [38 × 31]&gt;
+##  5 Chris Brunt                          2       19151 &lt;tibble [38 × 31]&gt;
+##  6 Chris Brunt                          3       19151 &lt;tibble [38 × 31]&gt;
+##  7 Bojan Krkic                          3       40276 &lt;tibble [38 × 31]&gt;
+##  8 Bojan Krkic Perez                    3       40276 &lt;tibble [38 × 31]&gt;
+##  9 Eduardo Dos Reis Carvalho            1       41251 &lt;tibble [7 × 31]&gt; 
+## 10 Eduardo dos Reis Carvalho            1       41251 &lt;tibble [38 × 31]&gt;
+## # … with 48 more rows</code></pre>
+<p>Below we fix the name/position issues so the <code>vaastav</code> table can be combined with our <code>players</code> table from the FPL API.</p>
+<pre class="r"><code># Merge rows belonging to a single player
+vaastav &lt;- vaastav %&gt;%
+  mutate(
+    # Add `element_type` to the `history` datasets
+    history = map2(history, element_type, function(x, y) {
+      x$element_type &lt;- y
+      return(x)
+    })
+  ) %&gt;% 
+  # Collapse into one row per `player_code`
+  group_by(player_code) %&gt;% 
+  summarize(
+    name = last(name),
+    history = list(bind_rows(history))
+  ) %&gt;%
+  ungroup() %&gt;% 
+  arrange(player_code)</code></pre>
+<p>Please note that if a player’s position changed during an ongoing season, as opposed to in between seasons, we are not able to capture that with our current data (I don’t know if this actually happens). In the <code>vaastav</code> table, we get <code>element_type</code> from his <code>players_raw.csv</code> files; these files only describe a player’s position at the end of a season. In <code>players</code>, we have an opportunity to capture position changes, but I didn’t bother doing it because I’m not able to correct the problem in <code>vaastav</code>. As a consequence, each player’s position will be fixed within a given season, even if it actually changed in real life. For the time being, this is a potential problem that we’ll just have to live with.</p>
+<p>We’re now left with a table, <code>vaastav</code>, where each row represents a player, and contains a nested dataset over his performance going back to the start of the 2016 Premier League season:</p>
+<pre class="r"><code>vaastav </code></pre>
+<pre><code>## # A tibble: 1,086 x 3
+##    player_code name                history           
+##          &lt;dbl&gt; &lt;chr&gt;               &lt;list&gt;            
+##  1        1243 Robert Green        &lt;tibble [33 × 32]&gt;
+##  2        1616 Alexander Manninger &lt;tibble [38 × 32]&gt;
+##  3        1632 Gareth Barry        &lt;tibble [76 × 32]&gt;
+##  4        1718 John Terry          &lt;tibble [38 × 32]&gt;
+##  5        1801 Paul Robinson       &lt;tibble [76 × 32]&gt;
+##  6        1822 Shay Given          &lt;tibble [38 × 32]&gt;
+##  7        2404 Michael Carrick     &lt;tibble [76 × 32]&gt;
+##  8        2513 Jamie Murphy        &lt;tibble [38 × 32]&gt;
+##  9        3201 Stuart Taylor       &lt;tibble [67 × 32]&gt;
+## 10        3736 John O&#39;Shea         &lt;tibble [38 × 32]&gt;
+## # … with 1,076 more rows</code></pre>
+</div>
+<div id="combining-data-from-current-and-previous-seasons" class="section level2">
+<h2>Combining data from current and previous seasons</h2>
+<p>At this stage, we’ve got the <code>players</code> table containing data from the <strong>current</strong> PL season, and the <code>vaastav</code> table containing data from <strong>previous</strong> PL seasons. We want to combine these tables, leaving us with a rich description of the real world phenomenon we call the Premier League. With this table, we’ll be able to visualize complex information, make predictions, and beat my friends at a silly online game.</p>
+<pre class="r"><code># Combine `vaastav` and `players`
+completed_fixtures &lt;- vaastav %&gt;% 
+  left_join(
+    players %&gt;% 
+      select(player_code, current_season_history = history),
+    by = &quot;player_code&quot;
+  ) %&gt;% 
+  mutate(
+    # Add a helper variable indicating whether a player still plays in the Premier League
+    in_current_season = map_lgl(current_season_history, ~!is.null(.x)),
+    # Merge the history datasets
+    history = map2(history, current_season_history, function(x, y) {
+      if(is.null(y)) return(x)
+      else return(bind_rows(x, y))
+    })
+  ) %&gt;% 
+  select(-current_season_history) %&gt;% 
+  unnest()
+
+completed_fixtures</code></pre>
+<pre><code>## # A tibble: 68,784 x 35
+##    player_code name  in_current_seas… element fixture opponent_team total_points was_home kickoff_time        team_h_score team_a_score round
+##          &lt;dbl&gt; &lt;chr&gt; &lt;lgl&gt;              &lt;dbl&gt;   &lt;dbl&gt;         &lt;dbl&gt;        &lt;dbl&gt; &lt;lgl&gt;    &lt;dttm&gt;                     &lt;dbl&gt;        &lt;dbl&gt; &lt;dbl&gt;
+##  1        1243 Robe… FALSE                547      51             4            0 FALSE    2017-09-23 14:00:00            0            0     6
+##  2        1243 Robe… FALSE                547      63            17            0 TRUE     2017-09-30 11:30:00            0            4     7
+##  3        1243 Robe… FALSE                547      78            16            0 FALSE    2017-10-14 14:00:00            2            0     8
+##  4        1243 Robe… FALSE                547      83            12            0 TRUE     2017-10-21 14:00:00            2            1     9
+##  5        1243 Robe… FALSE                547      97            10            0 FALSE    2017-10-28 14:00:00            3            0    10
+##  6        1243 Robe… FALSE                547     103            19            0 TRUE     2017-11-04 15:00:00            1            0    11
+##  7        1243 Robe… FALSE                547     112             2            0 FALSE    2017-11-18 15:00:00            4            0    12
+##  8        1243 Robe… FALSE                547     122            11            0 TRUE     2017-11-26 16:00:00            1            2    13
+##  9        1243 Robe… FALSE                547     135             1            0 FALSE    2017-11-29 19:45:00            5            0    14
+## 10        1243 Robe… FALSE                547     145             7            0 FALSE    2017-12-02 15:00:00            2            0    15
+## # … with 68,774 more rows, and 23 more variables: minutes &lt;dbl&gt;, goals_scored &lt;dbl&gt;, assists &lt;dbl&gt;, clean_sheets &lt;dbl&gt;, goals_conceded &lt;dbl&gt;,
+## #   own_goals &lt;dbl&gt;, penalties_saved &lt;dbl&gt;, penalties_missed &lt;dbl&gt;, yellow_cards &lt;dbl&gt;, red_cards &lt;dbl&gt;, saves &lt;dbl&gt;, bonus &lt;dbl&gt;, bps &lt;dbl&gt;,
+## #   influence &lt;dbl&gt;, creativity &lt;dbl&gt;, threat &lt;dbl&gt;, ict_index &lt;dbl&gt;, value &lt;dbl&gt;, transfers_balance &lt;dbl&gt;, selected &lt;dbl&gt;, transfers_in &lt;dbl&gt;,
+## #   transfers_out &lt;dbl&gt;, element_type &lt;dbl&gt;</code></pre>
+<p>The rows in <code>completed_fixtures</code> are a single player’s stats from a single game, let’s call them <em>player-fixtures</em>. Now that we’ve got all of our 68784 player-fixtures stored in a single table, we can perform some simple cleaning operations to make the data a bit more user friendly.</p>
+<p>We’ll perform the following cleaning operations:</p>
+<ul>
+<li>Add a categorical variable indicating which PL season each fixture belongs to.</li>
+<li>Replace team <code>id</code> values with the team’s name.</li>
+<li>Replace <code>element_type</code> with a more interpretable <code>position</code> variable.</li>
+</ul>
+<p>Adding team names to our <code>completed_fixtures</code> table is a bit of an ordeal. We have our <code>teams</code> table from the API, but this table doesn’t contain information about teams that are not currently playing in the Premier League. Vaastav’s repository does contain <code>team_codes</code>, but it doesn’t contain team names. Furthermore, our <code>completed_fixtures</code> table references teams by their <code>id</code> value (which can change every season), not their <code>team_code</code>.</p>
+<p>To get around all this, we’ll start by building an overview of all team codes and team names going back to the 2016 season:</p>
+<pre class="r"><code># Get previous season (2018-19) team names from vaastav&#39;s repository
+team_names &lt;- paste0(
+    &quot;https://raw.githubusercontent.com/&quot;,
+    &quot;vaastav/Fantasy-Premier-League/master/data/2018-19/raw.json&quot;
+  ) %&gt;% 
+  fromJSON(.) %&gt;% 
+  .$teams %&gt;% 
+  as_tibble() %&gt;% 
+  bind_rows(
+    # Get current season (2019-20) team names from the FPL api.
+    bootstrap_static$teams
+  ) %&gt;% 
+  select(code, name) %&gt;% 
+  # Add some missing teams manually
+  bind_rows(
+    tribble(
+      ~code, ~name, 
+      88,  &quot;Hull&quot;,
+      25,  &quot;Middlesbrough&quot;,
+      56,  &quot;Sunderland&quot;,
+      35,  &quot;West Bromwich Albion&quot;,
+      80,  &quot;Swansea City&quot;,
+      110, &quot;Stoke City&quot;
+    )
+  ) %&gt;% 
+  distinct()
+
+team_names</code></pre>
+<pre><code>## # A tibble: 29 x 2
+##     code name          
+##    &lt;dbl&gt; &lt;chr&gt;         
+##  1     3 Arsenal       
+##  2    91 Bournemouth   
+##  3    36 Brighton      
+##  4    90 Burnley       
+##  5    97 Cardiff       
+##  6     8 Chelsea       
+##  7    31 Crystal Palace
+##  8    11 Everton       
+##  9    54 Fulham        
+## 10    38 Huddersfield  
+## # … with 19 more rows</code></pre>
+<p>The next step is to build an overview over team <code>id</code> values and <code>team_code</code> for each season. Vaastav has this covered, so we’ll just use data from his repository, including the latest season (which we’ve been using the API for up to this point).</p>
+<pre class="r"><code># Get `id` and `code` values for each team, from each season
+team_ids &lt;- tibble(
+  season = c(&quot;2016-17&quot;,&quot;2017-18&quot;,&quot;2018-19&quot;, &quot;2019-20&quot;)
+) %&gt;% 
+  mutate(
+    player_info = map(season, function(x) {
+      paste0(
+        &quot;https://raw.githubusercontent.com/&quot;,
+        &quot;vaastav/Fantasy-Premier-League/master/data/&quot;,
+        x, &quot;/players_raw.csv&quot;
+      ) %&gt;% 
+        read_csv() %&gt;% 
+        select(team, team_code) %&gt;% 
+        distinct()
+    })
+  ) %&gt;% 
+  unnest() %&gt;% 
+  as_tibble() %&gt;% 
+  select(season, id = team, code = team_code) %&gt;% 
+  # Add team names
+  left_join(team_names, by = &quot;code&quot;) %&gt;% 
+  arrange(season, id)
+
+team_ids</code></pre>
+<pre><code>## # A tibble: 80 x 4
+##    season     id  code name          
+##    &lt;chr&gt;   &lt;dbl&gt; &lt;dbl&gt; &lt;chr&gt;         
+##  1 2016-17     1     3 Arsenal       
+##  2 2016-17     2    91 Bournemouth   
+##  3 2016-17     3    90 Burnley       
+##  4 2016-17     4     8 Chelsea       
+##  5 2016-17     5    31 Crystal Palace
+##  6 2016-17     6    11 Everton       
+##  7 2016-17     7    88 Hull          
+##  8 2016-17     8    13 Leicester     
+##  9 2016-17     9    14 Liverpool     
+## 10 2016-17    10    43 Man City      
+## # … with 70 more rows</code></pre>
+<p>Finally, we’ll create the <code>season</code> variable, replace the <code>id</code> values in <code>completed_fixtures</code> with team names, and create the <code>position</code> variable based on <code>element_type</code>:</p>
+<pre class="r"><code># Helper function for identifying which PL season a given date belongs to
+get_season &lt;- function(x) {
+  require(lubridate)
+  
+  year &lt;- year(x)
+  month &lt;- month(x)
+  
+  case_when(
+    month %in% c(1:7) ~ paste(year - 1, str_sub(year, 3, 4), sep = &quot;-&quot;),
+    month %in% c(8:12) ~ paste(year, str_sub(year + 1, 3, 4), sep = &quot;-&quot;)
+  )
+}
+
+completed_fixtures &lt;- completed_fixtures %&gt;% 
+  # Add a `season` column
+  mutate(season = map_chr(kickoff_time, ~get_season(.x))) %&gt;% 
+  # Replace `opponent_team` id values with team names
+  rename(opponent_team_id = opponent_team) %&gt;% 
+  left_join(
+    team_ids %&gt;% 
+      select(season, opponent_team_id = id, opponent_team = name),
+    by = c(&quot;season&quot;, &quot;opponent_team_id&quot;)
+  ) %&gt;% 
+  select(-opponent_team_id) %&gt;% 
+  # Add a `team_name` variable for indicating what team a player belongs to
+  left_join(
+    {. -&gt; x; x %&gt;% 
+      group_by(season, fixture, was_home) %&gt;% 
+      summarize(team_name = first(opponent_team)) %&gt;% 
+      mutate(was_home = !was_home)},
+    by = c(&quot;season&quot;, &quot;fixture&quot;, &quot;was_home&quot;)
+  ) %&gt;% 
+  # Create the `position` variable
+  mutate(
+    position = case_when(
+      element_type == 1 ~ &quot;GK&quot;,
+      element_type == 2 ~ &quot;DEF&quot;,
+      element_type == 3 ~ &quot;MID&quot;,
+      element_type == 4 ~ &quot;FWD&quot;
+    )
+  ) %&gt;% 
+  # Order columns
+  select(
+    player_code, name, kickoff_time, season, team_name, opponent_team, position,
+    everything(), -element_type
+  ) %&gt;% 
+  # Order rows
+  arrange(season, fixture, team_name)</code></pre>
+<p>That’s it. Behold our final table in all its glory (only showing 100 of 68822 rows to avoid slowing down your browser):</p>
+<div id="htmlwidget-1" style="width:100%;height:auto;" class="datatables html-widget"></div>
+<script type="application/json" data-for="htmlwidget-1">{"x":{"filter":"none","data":[[15157,60914,56979,171287,92217,110979,66797,169187,97032,68312,195473,15157,118748,92217,169187,217989,116535,116643,175592,58376,78356,58822,84939,40383,88900,101178,80447,83283,78056,132015,40146,20452,128198,107265,171771,151086,167075,220598,93100,96787,91047,213482,204481,232797,193109,153371,37265,156689,148225,18892,55909,51940,197365,95658,109322,43670,106760,58893,176297,40002,62398,74208,76359,66749,42899,6744,200617,214590,180804,195851,209041,51940,184667,214590,18892,101582,216051,232928,222677,220688,159533,94147,194634,165808,166324,19236,114128,19624,151589,87835,222531,102057,107613,38533,41727,171317,216054,90585,168399,214048],["James Milner","Joel Matip","Jordan Henderson","Joseph Gomez","Roberto Firmino","Sadio Mané","Simon Mignolet","Trent Alexander-Arnold","Virgil van Dijk","Xherdan Shaqiri","Rhian Brewster","James Milner","Mohamed Salah","Roberto Firmino","Trent Alexander-Arnold","Rafael Camacho","Alisson Ramses Becker","Fabio Henrique Tavares","Naby Keita","Alex McCarthy","Charlie Austin","Cédric Soares","Danny Ings","Fraser Forster","Jack Stephens","James Ward-Prowse","Maya Yoshida","Nathan Redmond","Oriol Romeu Vidal","Pierre-Emile Højbjerg","Ryan Bertrand","Shane Long","Sofiane Boufal","Angus Gunn","Jan Bednarek","Mario Lemina","Wesley Hoedt","Michael Obafemi","Jannik Vestergaard","Mohamed Elyounoussi","Stuart Armstrong","Yan Valery","Tyreke Johnson","Kayne Ramsay","Callum Slattery","Sam Gallagher","Alexis Sánchez","Andreas Pereira","Anthony Martial","Ashley Young","Chris Smalling","David de Gea","Eric Bailly","Harry Maguire","Jesse Lingard","Juan Mata","Luke Shaw","Marcos Rojo","Marcus Rashford","Matteo Darmian","Nemanja Matic","Paul Pogba","Phil Jones","Romelu Lukaku","Sergio Romero","Lee Grant","Daniel James","Aaron Wan-Bissaka","Axel Tuanzebe","Scott McTominay","Angel Gomes","David De Gea","Victor Lindelöf","Aaron Wan-Bissaka","Ashley Young","Frederico Rodrigues de Paula Santos","José Diogo Dalot Teixeira","James Garner","Tahith Chong","Mason Greenwood","Adama Traoré","Conor Coady","Diogo Jota","Hélder Costa","Ivan Cavaleiro","John Ruddy","Jonathan Castro Otto","João Filipe Iria Santos Moutinho","Leander Dendoncker","Matt Doherty","Morgan Gibbs-White","Raúl Jiménez","Romain Saïss","Rui Pedro dos Santos Patrício","Ryan Bennett","Rúben Diogo da Silva Neves","Rúben Gonçalo Silva Nascimento Vinagre","Willy Boly","Will Norris","Max Kilman"],["2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-17T12:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z","2019-08-19T17:00:00Z"],["2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20","2019-20"],["Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves"],["Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Southampton","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Liverpool","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Wolves","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd","Man Utd"],["MID","DEF","MID","DEF","MID","MID","GK","MID","DEF","MID","FWD","DEF","MID","FWD","DEF","MID","GK","MID","MID","GK","FWD","DEF","FWD","GK","DEF","MID","DEF","MID","MID","MID","DEF","FWD","MID","GK","DEF","MID","DEF","FWD","DEF","MID","MID","DEF","MID","DEF","MID","FWD","MID","MID","MID","MID","DEF","GK","DEF","DEF","MID","MID","DEF","DEF","FWD","DEF","MID","MID","DEF","FWD","GK","GK","MID","MID","DEF","MID","MID","GK","DEF","DEF","DEF","MID","DEF","MID","MID","FWD","MID","DEF","MID","MID","MID","GK","DEF","MID","MID","DEF","MID","FWD","DEF","GK","DEF","MID","DEF","DEF","GK","DEF"],[true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true],[200,185,198,184,187,192,190,182,183,194,464,200,191,187,182,201,189,197,196,318,312,486,313,317,308,321,310,320,328,325,305,315,508,319,307,324,485,314,304,322,323,306,326,311,327,316,240,246,239,224,223,235,228,160,241,242,226,227,233,230,247,238,231,232,236,237,243,122,481,248,245,235,225,122,224,244,229,250,249,234,417,403,410,418,419,412,402,415,420,401,416,409,407,411,404,414,406,405,413,408],[19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,19,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20,20],[6,2,1,0,8,13,0,1,2,0,0,6,3,8,1,0,0,1,0,0,0,0,6,0,0,2,1,2,1,2,1,0,0,2,1,0,0,0,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true],[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null],[2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null],[2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2],[73,90,1,0,90,90,0,90,90,0,0,73,78,90,90,0,0,16,0,0,0,0,26,0,0,90,90,90,63,90,76,0,0,90,90,0,0,0,90,0,22,90,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,1,1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[1,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[1,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,1,0,0,1,1,0,1,1,0,0,0,0,1,1,0,0,1,0,0,0,0,1,0,0,2,2,2,1,2,2,0,0,2,2,0,0,0,2,0,1,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,1,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,2,3,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[18,14,3,0,31,45,0,7,16,0,0,18,0,31,7,0,0,6,0,0,0,0,22,0,0,15,7,6,12,10,6,0,0,16,10,0,0,0,13,0,4,14,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[20.4,27.2,0,0,36.4,71.6,0,9.6,30,0,0,20.4,2.4,36.4,9.6,0,0,4.4,0,0,0,0,29.2,0,0,11.2,12.4,3.6,14.4,12,0.6,0,0,30.2,16.8,0,0,0,20.2,0,0.4,21,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[24.1,1.3,3.3,0,6.9,56,0,29.3,1.1,0,0,24.1,11.8,6.9,29.3,0,0,0.3,0,0,0,0,0.8,0,0,29.3,0.3,22.8,14.4,5.2,1.1,0,0,0,0.7,0,0,0,14.2,0,0.7,16.1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[17,4,0,0,15,40,0,4,2,0,0,17,29,15,4,0,0,0,0,0,0,0,59,0,0,2,37,11,0,25,2,0,0,0,0,0,0,0,4,0,0,22,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[6.2,3.3,0.3,0,5.8,16.8,0,4.3,3.3,0,0,6.2,4.3,5.8,4.3,0,0,0.5,0,0,0,0,8.9,0,0,4.3,5,3.7,2.9,4.2,0.4,0,0,3,1.8,0,0,0,3.8,0,0.1,5.9,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[55,54,55,55,95,115,45,70,65,65,45,55,125,95,70,45,59,55,60,45,60,50,60,45,45,60,45,65,45,50,50,50,55,45,45,50,45,50,50,55,55,50,45,40,45,45,70,50,76,55,55,56,50,55,65,65,55,50,86,50,50,85,50,85,50,50,60,55,45,50,50,56,55,55,55,55,49,45,45,45,50,50,65,50,50,45,55,55,45,60,50,75,45,50,50,55,45,50,40,40],[-5296,-15407,4952,3745,-14227,-51300,-1082,32545,60548,-4399,-41,-5296,114282,-14227,32545,-21,-1035061,3518,-10059,-5860,-4205,-2872,-17541,-4881,-672,-6524,-2657,-17182,1416,-5805,-5951,-41446,-348,-3047,-3212,-1622,-578,-1033,-1184,-571,-1423,-2813,-432,-3437,-211,-360,-17166,44368,200074,-4538,-2871,361048,-765,45576,6802,-4544,-3798,-1470,271490,-911,-6547,118064,-1862,-17784,-1836,-1083,18587,88267,-1061,2846,-1165,361048,-4544,88267,-4538,-1768,-2534,-586,-1591,-9588,-2103,-1585,-67433,-317,-150,-1796,-3909,-19074,74728,-7294,-568,-124842,-1528,-3623,-991,-20722,-1812,6703,-2894,-557],[50003,58235,61833,128977,673000,863447,3382,1492715,3217035,27411,38729,50003,2778082,673000,1492715,400,741621,77496,26267,41260,7058,17725,119615,61187,8284,54070,21568,119174,81446,46040,65810,299229,4313,49588,43690,10349,5151,15954,10924,3889,9548,22492,1768,75158,12295,4262,51826,71134,619935,24140,18452,1214601,2599,1156657,106173,28575,122341,9652,1448980,5733,36077,635071,12276,32052,11396,7064,171379,2177360,8218,47686,7938,1214601,78371,2177360,24140,10797,11047,6977,16570,1004223,18781,98516,730131,1364,634,33242,72395,399959,995077,224750,6170,1237196,18119,297138,39823,500641,17474,424345,47500,114213],[2122,3002,11571,15726,52788,64639,96,82300,107209,1850,5555,2122,156910,52788,82300,60,4603,12765,1653,144,56,380,3638,1463,154,1391,320,2549,7808,801,1462,11315,334,1311,648,353,75,1236,232,67,256,355,52,2749,1003,457,382,55938,232598,847,678,394301,85,86312,19786,1819,7217,401,312546,152,2691,154468,531,204,185,75,37336,142479,347,9487,675,394301,3072,142479,847,692,358,595,1203,72860,1140,3903,28482,88,51,981,1801,18534,115925,8662,324,37818,643,14551,1825,22561,454,31570,1857,9449],[7418,18409,6619,11981,67015,115939,1178,49755,46661,6249,5596,7418,42628,67015,49755,81,1039664,9247,11712,6004,4261,3252,21179,6344,826,7915,2977,19731,6392,6606,7413,52761,682,4358,3860,1975,653,2269,1416,638,1679,3168,484,6186,1214,817,17548,11570,32524,5385,3549,33253,850,40736,12984,6363,11015,1871,41056,1063,9238,36404,2393,17988,2021,1158,18749,54212,1408,6641,1840,33253,7616,54212,5385,2460,2892,1181,2794,82448,3243,5488,95915,405,201,2777,5710,37608,41197,15956,892,162660,2171,18174,2816,43283,2266,24867,4751,10006]],"container":"<table class=\"display\">\n  <thead>\n    <tr>\n      <th>player_code<\/th>\n      <th>name<\/th>\n      <th>kickoff_time<\/th>\n      <th>season<\/th>\n      <th>team_name<\/th>\n      <th>opponent_team<\/th>\n      <th>position<\/th>\n      <th>in_current_season<\/th>\n      <th>element<\/th>\n      <th>fixture<\/th>\n      <th>total_points<\/th>\n      <th>was_home<\/th>\n      <th>team_h_score<\/th>\n      <th>team_a_score<\/th>\n      <th>round<\/th>\n      <th>minutes<\/th>\n      <th>goals_scored<\/th>\n      <th>assists<\/th>\n      <th>clean_sheets<\/th>\n      <th>goals_conceded<\/th>\n      <th>own_goals<\/th>\n      <th>penalties_saved<\/th>\n      <th>penalties_missed<\/th>\n      <th>yellow_cards<\/th>\n      <th>red_cards<\/th>\n      <th>saves<\/th>\n      <th>bonus<\/th>\n      <th>bps<\/th>\n      <th>influence<\/th>\n      <th>creativity<\/th>\n      <th>threat<\/th>\n      <th>ict_index<\/th>\n      <th>value<\/th>\n      <th>transfers_balance<\/th>\n      <th>selected<\/th>\n      <th>transfers_in<\/th>\n      <th>transfers_out<\/th>\n    <\/tr>\n  <\/thead>\n<\/table>","options":{"scrollX":"1000px","columnDefs":[{"className":"dt-right","targets":[0,8,9,10,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36]}],"order":[],"autoWidth":false,"orderClasses":false}},"evals":[],"jsHooks":[]}</script>
+<p>It’s worth noting that we have limited ourselves to columns that are present in the current version of the API, and all of the csv files in Vaastav. This means that we’ve thrown away a few columns that are only available in one of the two sources; not ideal, but if we didn’t take this approach we’d get a lot of trouble with missing values when we get to the predictive modelling stage of our path to FPL dominance.</p>
+</div>

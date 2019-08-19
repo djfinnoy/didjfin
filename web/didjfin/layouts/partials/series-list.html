@@ -1,0 +1,21 @@
+{{ $series := $.Page.Params.series }}
+{{ if $series }}
+<br><br>
+<div class="card card-body">
+  <em >This post is part of a series:</em>
+  <h4>{{ delimit $series "" }}</h4>
+  <ol>
+    {{ range $ind,$art := $.Site.Pages.ByParam "series_weight" }}
+      {{ if eq $art.Params.series $series }}
+        <li>
+          {{ if eq $art.Permalink $.Page.Permalink}}
+          {{ $art.Params.title }}
+          {{ else }}
+            <a href="{{ $art.Permalink }}">{{ $art.Params.title }}</a>
+          {{ end }}
+        </li>
+      {{ end }}
+    {{ end }}
+  </ol>
+</div>
+{{ end }}

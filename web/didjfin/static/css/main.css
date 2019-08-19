@@ -1,0 +1,202 @@
+/* General appearance */
+html, body {
+  height: 100%;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+main {
+  margin: auto;
+  padding: 25px;
+  flex: 1 0 auto;
+  max-width: 1024px;
+  margin-top: 5em;
+}
+
+footer {
+  margin-top:auto;
+}
+
+.page-footer {
+  border-bottom: 8px solid var(--borderAccent);
+}
+
+.homepage-content {
+  margin-top: 10vh;
+  margin-bottom: 10vh;
+}
+
+.site-title {
+  margin: 5vh;
+  text-align: center;
+  font-size: 12vh;
+}
+
+.site-caption {
+  font-weight:bold;
+  margin-bottom:12vh;
+}
+
+hr {
+  border-top: 1px solid var(--fillBorderAccent) !important;
+}
+
+.post-title {
+  text-align: center;
+}
+
+.card {
+  background-color: var(--fillAccent) !important;
+  border: 1px solid var(--fillBorderAccent) !important;
+}
+
+h2, h3, h4, h5 {
+  margin-top: 1em !important;
+}
+
+.about-intro {
+  font-style: italic;
+}
+
+.blockquote {
+  font-size: .8rem !important;
+}
+
+a:hover {
+  color: var(--accent) !important;
+  text-decoration: none !important;
+}
+
+a:link, a:visited {
+  color: var(--accent);
+}
+
+/* Navbar */
+.navbar {
+  border-top: 10px solid var(--borderAccent);
+  border-bottom: 1px solid var(--fillBorderAccent);
+  background-color: var(--fillAccent);
+  text-align: center;
+  font-size: 14px;
+}
+
+.nav-link,
+.nav-link:hover {
+  color: #777 !important;
+}
+
+.nav-icons > ul,
+.nav-icons > ul > li {
+  display:inline-block;
+  padding-left: 6px;
+  padding-right: 6px;
+  font-size: 110%;
+}
+
+.nav-link .active {
+  font-weight: bold !important;
+}
+
+
+/* Blockquote (Homepage) */
+blockquote {
+  border-left: none !important;
+}
+
+blockquote:before {
+  color: #ccc;
+  content: open-quote;
+  font-size: 4em;
+  line-height: 0.1em;
+  margin-right: 0.25em;
+  vertical-align: -0.4em;
+}
+
+blockquote p {
+  display: inline;
+}
+
+/* Code blocks */
+.hljs-meta,
+.hljs-comment {
+  color: gray !important;
+}
+
+:not(pre) > code {
+  color: #333 !important;
+  background-color: #e5e9f0;
+  padding: 2px !important;
+}
+
+pre {
+  background-color: var(--fillAccent) !important;
+  border: 1px solid var(--fillBorderAccent) !important;
+}
+
+/* Comments */
+.utterances {
+  margin-top: 3em;
+  margin-bottom: 3em;
+}
+
+/* DataTables */
+table.dataTable.display tbody tr.odd {
+  background-color: var(--fillAccent) !important;
+}
+
+table.dataTable.display tbody tr.even {
+  background-color: white !important;
+}
+
+table.dataTable thead th {
+  border-bottom: 1px solid var(--fillBorderAccent) !important;
+}
+
+table.dataTable tr td {
+  border-bottom: 1px solid var(--fillBorderAccent) !important;
+}
+
+.dataTables_scrollBody {
+  border-bottom: 1px solid var(--fillBorderAccent) !important;
+}
+
+.datatables {
+  padding-bottom: 2em;
+}
+
+/* Pagination */
+.custom-paginator > .btn {
+  background-color: var(--fillAccent) !important;
+  border: 1px solid var(--fillBorderAccent) !important;
+  color: #777 !important;
+  font-size: 10px !important;
+}
+
+.custom-paginator > a.btn:hover {
+  color: #777 !important;
+}
+
+/* Tags */
+.badge {
+  padding: .4em .4em !important;
+}
+
+.badge-info {
+  background-color: #b48ead !important;
+}
+
+.badge-info > a,
+.badge-info > a:hover {
+  color: white !important;
+  font-family: inherit;
+  font-weight: normal;
+  text-decoration: none;
+}
+
+/* Iframe */
+iframe {
+  min-width: 100%;
+}

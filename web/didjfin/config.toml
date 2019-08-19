@@ -1,0 +1,67 @@
+baseURL = "http://www.didjfin.no/"
+title = "didjfin.no"
+sectionPagesMenu = "main"
+ignoreFiles = ["no_render", "\\.Rmd$", "\\.Rmarkdown$", "_files$", "_cache$"]
+paginate = 10
+
+[params]
+  accent = "#5e81ac"
+	borderAccent = "#a3be8c"
+  backgroundColor = "white"
+  fillAccent = "#eceff4"
+  fillBorderAccent = "#d8dee9"
+  font = "Roboto" 
+  siteTitleFont = "Aguafina Script"
+
+  dateFormat = "January, 2006" 
+  description = "A personal website about Data Science, programming, and technology."
+  seriesLimit = 10 # Should be same as paginate above
+
+
+[menu]
+  [[menu.main]]
+    identifier = "home"
+    name = "Home"
+    url = "/"
+    weight = 1
+
+  [[menu.main]]
+    identifier = "about"
+    name = "About"
+    url = "/about/"
+    weight = 2
+
+  [[menu.main]]
+    identifier = "blog"
+    name = "Blog"
+    url = "/blog/"
+    weight = 3
+
+  [[menu.icon]]
+      url = "mailto:djfinnoy@protonmail.com"
+      name = "envelope-o"
+      weight = 1
+
+  [[menu.icon]]
+      url = "https://github.com/djfinnoy/"
+      name = "github"
+      weight = 2
+
+  [[menu.icon]]
+      url = "https://www.linkedin.com/in/dfinnoy/"
+      name = "linkedin"
+      weight = 3
+
+  [[menu.icon]]
+      url = "https://stackexchange.com/users/13584156/djfinnoy"
+      name = "stack-overflow"
+      weight = 4
+
+[taxonomies]
+  tag = "tags"
+  series = "series"
+
+[sitemap]
+  changefreq = "monthly"
+  filename = "sitemap.xml"
+  priority = 0.5

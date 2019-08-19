@@ -1,0 +1,21 @@
+{{ define "main" }}
+
+<h1>{{ .Title }}</h1>
+{{ if eq .Title "Series" }}
+  {{ range $key, $taxonomy := .Site.Taxonomies.series }}
+    <p>
+      <a href="../series/{{ $key | urlize }}" >{{ replace $key "-" " " | title }}</a>
+      <br>
+      {{ len $taxonomy.Pages }} post(s)
+    </p>
+  {{ end }}
+{{ end }}
+
+{{ if eq .Title "Tags"}}
+  <p>
+  {{ range $key, $taxonomy := .Site.Taxonomies.tags }}
+    <a href="../tags/{{ $key | urlize }}" style="text-decoration:none;"><kbd class="item-tag">{{ $key | title }}</kbd></a>
+  {{ end }}
+  </p>
+{{ end }}
+{{ end }}

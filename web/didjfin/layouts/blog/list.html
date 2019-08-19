@@ -1,0 +1,47 @@
+{{ define "main" }}
+
+<div class="row">
+  <div class="col-6 text-center">
+    <h3>Recent posts</h3>
+    {{ range .Paginator.Pages }}
+    <p>
+      <a href="{{ .RelPermalink }}">{{ .Title }}</a>
+      <br>
+      {{ partial "date-and-tags.html" . }}
+    </p>
+    {{ end }}
+    {{ partial "pagination.html" . }}
+  </div>
+  <div class="col-6 text-center">
+    <h3>Post series</h3>
+    {{ $.Scratch.Set "seriesLimit" 0 }}
+    {{ range $key, $taxonomy := .Site.Taxonomies.series }}
+      {{- $.Scratch.Set "seriesLimit" (add ($.Scratch.Get "seriesLimit") 1) }}
+      {{- if le ($.Scratch.Get "seriesLimit") ($.Site.Param `seriesLimit`) }}
+      <p>
+        <a href="../series/{{ $key | urlize }}" >{{ replace $key "-" " " | title }}</a>
+        <br>
+        {{ len $taxonomy.Pages }} post(s)
+      </p>
+      {{ else }}
+      <br>
+      <a href="../series" style="font-size:smaller;">..Show all</a>
+      {{ end }}
+    {{ end }}
+  </div>
+</div>
+<hr>
+<div class="row">
+  <div class="col-12 text-center">
+    <h3>Content tags</h3>
+    <p>
+    {{ range $key, $taxonomy := .Site.Taxonomies.tags }}
+			<span class="badge badge-info">
+	      <a href="../tags/{{ $key | urlize }}">{{ $key | title }}</a>
+			</span>
+    {{ end }}
+    </p>
+  </div>
+</div>
+
+{{ end }}

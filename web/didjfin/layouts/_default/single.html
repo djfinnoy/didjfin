@@ -1,0 +1,13 @@
+{{ define "main" }}
+
+{{ if not .Params.contentOnly }}
+  <h1 class="post-title">{{ .Title }}</h1>
+  <center>{{ partial "date-and-tags.html" . }}</center>
+  {{ partial "series-list.html" . }}
+  <hr>
+{{ end }}
+{{ .Content }}
+{{ if not .Params.contentOnly }}
+  {{ partial "comments.html" . }}
+{{ end }}
+{{ end }}
