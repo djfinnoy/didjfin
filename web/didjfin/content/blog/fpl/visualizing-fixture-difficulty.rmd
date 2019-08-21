@@ -44,7 +44,6 @@ library(jsonlite)
 bootstrap_static <- readRDS("./data/fantasy-premier-league-data/bootstrap-static.RDS")
 ```
 The `bootstrap_static` dataset from the FPL API contains all the information we need for superior fixture planning that will shock and baffle your competition.
-If you're not familiar with the FPL API, check out the first post in this series (link at the top).
 
 We'll start by creating an overview of teams that are participating in the current Premier League season.
 ```{r}

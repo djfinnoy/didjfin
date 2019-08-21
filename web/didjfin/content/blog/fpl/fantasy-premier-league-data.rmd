@@ -107,7 +107,7 @@ players <- bootstrap_static$elements %>%
     # Download the element-summary dataset for each player
     element_summary = map(id, function(x) {
       paste0(url, "element-summary/", x, "/") %>% 
-        fromJSON(element_summary_url)
+        fromJSON()
     }),
     # Extract data on upcoming fixtures for each player
     fixtures = map(element_summary, function(x) {
