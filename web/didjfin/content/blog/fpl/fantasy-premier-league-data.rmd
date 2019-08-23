@@ -49,6 +49,7 @@ bootstrap_static <- fromJSON(paste0(url, "bootstrap-static/"))
 library(tidyverse)
 library(jsonlite)
 
+url <- "https://fantasy.premierleague.com/api/"
 bootstrap_static <- readRDS("./data/fantasy-premier-league-data/bootstrap-static.RDS")
 ```
 
@@ -134,7 +135,7 @@ players <- bootstrap_static$elements %>%
         # Fix format issues (numeric variables being read as strings)
         mutate_at(
           vars(influence, creativity, threat, ict_index), 
-          funs(as.numeric)
+          list(~as.numeric(.))
         ) %>% 
         as_tibble()
     })
@@ -293,7 +294,7 @@ With this table, we'll be able to visualize complex information, make prediction
 ```{r}
 # Combine `vaastav` and `players`
 completed_fixtures <- vaastav %>% 
-  left_join(
+  full_join(
     players %>% 
       select(player_code, current_season_history = history),
     by = "player_code"
